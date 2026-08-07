@@ -16,6 +16,18 @@ Numa máquina Windows com **Python 3.10+** ([python.org](https://python.org) —
 build-windows.bat          (duplo clique)
 ```
 
+> **`'pip' não é reconhecido` / `'python' não é reconhecido`?** O instalador do
+> Python não marcou "Add Python to PATH". Use o lançador `py`, que costuma
+> funcionar mesmo assim:
+>
+> ```
+> py -m pip install -r requirements.txt
+> py testar-digitacao.py
+> ```
+>
+> Se `py --version` também falhar, o Python não está instalado. O
+> `build-windows.bat` já tenta os dois sozinho.
+
 Leva alguns minutos e produz `dist\bio-pdv\bio-pdv.exe`. Esse `.exe` já funciona
 sozinho — se você só quer testar, pode parar aqui e copiar a pasta `dist\bio-pdv`
 para o PC do caixa.

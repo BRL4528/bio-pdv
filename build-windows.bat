@@ -10,17 +10,30 @@ echo.
 echo === bio-pdv: build para Windows ===
 echo.
 
+rem Procura o Python. Quando o instalador nao marca "Add Python to PATH", o
+rem comando 'python' nao existe mas o lancador 'py' costuma existir.
+set "PYEXE="
 where python >nul 2>&1
-if errorlevel 1 (
-    echo [ERRO] Python nao encontrado no PATH.
-    echo Instale de https://python.org e marque "Add Python to PATH".
+if not errorlevel 1 set "PYEXE=python"
+if defined PYEXE goto :achou_python
+where py >nul 2>&1
+if not errorlevel 1 set "PYEXE=py"
+:achou_python
+
+if not defined PYEXE (
+    echo [ERRO] Python nao encontrado.
+    echo.
+    echo Nem 'python' nem 'py' respondem neste terminal.
+    echo Instale de https://python.org e MARQUE "Add Python to PATH"
+    echo na primeira tela do instalador.
     pause
     exit /b 1
 )
+echo Usando: %PYEXE%
 
 echo [1/4] Criando ambiente virtual...
 if not exist .venv-build (
-    python -m venv .venv-build || goto :erro
+    %PYEXE% -m venv .venv-build || goto :erro
 )
 
 echo [2/4] Instalando dependencias...
