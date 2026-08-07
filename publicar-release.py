@@ -37,6 +37,29 @@ def versao_do_codigo() -> str:
     return m.group(1)
 
 
+def repo_padrao() -> str:
+    """De onde sai o repositorio quando nao vem por --repo.
+
+    Ordem: BIOPDV_REPO -> remote do git -> o REPO compilado no updater.
+    """
+    try:
+        url = subprocess.run(
+            ["git", "remote", "get-url", "origin"],
+            capture_output=True, text=True, cwd=RAIZ, timeout=10,
+        ).stdout.strip()
+        m = re.search(r"github\.com[:/]+([^/]+/[^/.]+)", url)
+        if m:
+            return m.group(1)
+    except Exception:
+        pass
+    try:
+        sys.path.insert(0, RAIZ)
+        from biopdv.updater import REPO
+        return REPO
+    except Exception:
+        return ""
+
+
 def sha256(caminho: str) -> str:
     h = hashlib.sha256()
     with open(caminho, "rb") as f:
@@ -49,13 +72,14 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("versao", help="ex: 1.1.0")
     ap.add_argument("--notas", default="", help="o que mudou (vai na release)")
-    ap.add_argument("--repo", default=os.environ.get("BIOPDV_REPO", ""),
-                    help="ex: BRL4528/bio-pdv (padrao: o remote do git)")
+    ap.add_argument("--repo", default="",
+                    help="ex: BRL4528/bio-pdv (padrao: remote do git / updater)")
     ap.add_argument("--rascunho", action="store_true",
                     help="cria como rascunho, para revisar antes de publicar")
     args = ap.parse_args()
 
     versao = args.versao.lstrip("vV")
+    repo = args.repo or os.environ.get("BIOPDV_REPO", "") or repo_padrao()
 
     codigo = versao_do_codigo()
     if codigo != versao:
@@ -95,22 +119,26 @@ def main() -> int:
     print(f"      sha256 {digest}")
 
     if not shutil.which("gh"):
-        print("\n[3/3] gh CLI nao encontrado. Suba na mao em:")
-        print(f"      https://github.com/{args.repo or '<repo>'}/releases/new")
-        print(f"      tag: v{versao}")
-        print(f"      anexe: {caminho_zip}")
-        print(f"              {caminho_manifesto}")
-        print("\nOs DOIS arquivos sao obrigatorios: sem o manifest.json o "
-              "app recusa a atualizacao (nao teria como conferir o hash).")
+        alvo = (f"https://github.com/{repo}/releases/new"
+                if repo else "https://github.com/<seu-usuario>/<repo>/releases/new")
+        print("\n[3/3] gh CLI nao encontrado — suba os arquivos na mao.")
+        print(f"\n  1. Abra: {alvo}")
+        print(f"  2. Tag  : v{versao}")
+        print(f"  3. Anexe OS DOIS arquivos:")
+        print(f"       {caminho_zip}")
+        print(f"       {caminho_manifesto}")
+        print("\nSem o manifest.json o app RECUSA a atualizacao: e dele que sai")
+        print("o SHA-256 usado para conferir o pacote.")
+        print("\nPara automatizar da proxima vez:  winget install GitHub.cli")
         return 0
 
-    print("[3/3] Publicando no GitHub ...")
+    print(f"[3/3] Publicando em {repo or '(remote atual)'} ...")
     cmd = ["gh", "release", "create", f"v{versao}",
            caminho_zip, caminho_manifesto,
            "--title", f"bio-pdv {versao}",
            "--notes", args.notas or f"Versao {versao}"]
-    if args.repo:
-        cmd += ["--repo", args.repo]
+    if repo:
+        cmd += ["--repo", repo]
     if args.rascunho:
         cmd += ["--draft"]
 
