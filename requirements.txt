@@ -1,0 +1,7 @@
+pyserial>=3.5
+PySide6-Essentials>=6.6
+pynput>=1.7
+
+# Windows: obrigatorio para cifrar as senhas com DPAPI.
+# Sem isto o cofre cai para base64 (ofuscacao, NAO criptografia).
+pywin32>=306; sys_platform == "win32"

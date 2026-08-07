@@ -1,0 +1,24 @@
+# ambientes
+.venv/
+.venv-build/
+__pycache__/
+*.py[cod]
+
+# artefatos de build
+dist/
+build/
+release/
+Output/
+
+# DADOS SENSIVEIS -- nunca versionar
+# O cofre tem as senhas de supervisor e a auditoria tem dado pessoal.
+# Em producao eles ficam em %APPDATA%\bio-pdv, mas se alguem rodar do fonte
+# ou copiar pra ca, o git nao pode levar junto.
+cofre.json
+senhas.json
+auditoria.jsonl
+*.jsonl
+
+# so
+.DS_Store
+Thumbs.db
