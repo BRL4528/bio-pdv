@@ -33,8 +33,8 @@ from dataclasses import dataclass
 
 from . import __version__
 
-# Repositorio das releases. Troque para o seu.
-REPO = os.environ.get("BIOPDV_REPO", "cooasgo/bio-pdv")
+# Repositorio das releases.
+REPO = os.environ.get("BIOPDV_REPO", "BRL4528/bio-pdv")
 
 # Token opcional para repositorio privado.
 # ATENCAO: token embutido num PC de caixa pode ser extraido de la. Use um token

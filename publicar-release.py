@@ -50,7 +50,7 @@ def main() -> int:
     ap.add_argument("versao", help="ex: 1.1.0")
     ap.add_argument("--notas", default="", help="o que mudou (vai na release)")
     ap.add_argument("--repo", default=os.environ.get("BIOPDV_REPO", ""),
-                    help="ex: cooasgo/bio-pdv")
+                    help="ex: BRL4528/bio-pdv (padrao: o remote do git)")
     ap.add_argument("--rascunho", action="store_true",
                     help="cria como rascunho, para revisar antes de publicar")
     args = ap.parse_args()
