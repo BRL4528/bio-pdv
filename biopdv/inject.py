@@ -10,6 +10,7 @@ UTF-16, entao independe do layout de teclado (ABNT2, US, o que for).
 
 from __future__ import annotations
 
+import os
 import sys
 import time
 
@@ -134,6 +135,38 @@ if WINDOWS:
         _user32.GetWindowTextW(hwnd, buf, 512)
         return buf.value
 
+    _kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    # HANDLE e do tamanho de um ponteiro (8 bytes em x64); sem restype o
+    # ctypes assume c_int e TRUNCA o handle -- mesma familia de bug do cbSize
+    # do INPUT (ver digita() acima).
+    _kernel32.OpenProcess.restype = wintypes.HANDLE
+    PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+
+    def processo_em_foco() -> str:
+        """Nome do executavel (basename) da janela em foco, ou "" se nao
+        conseguir descobrir. Usado pela lista de apps autorizados -- titulo
+        de janela (janela_em_foco) qualquer programa pode reescrever, o
+        nome do processo e mais dificil de falsificar."""
+        hwnd = _user32.GetForegroundWindow()
+        pid = wintypes.DWORD()
+        _user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+        if not pid.value:
+            return ""
+        handle = _kernel32.OpenProcess(
+            PROCESS_QUERY_LIMITED_INFORMATION, False, pid.value)
+        if not handle:
+            return ""
+        try:
+            buf = ctypes.create_unicode_buffer(1024)
+            tamanho = wintypes.DWORD(len(buf))
+            ok = _kernel32.QueryFullProcessImageNameW(
+                handle, 0, buf, ctypes.byref(tamanho))
+            if not ok:
+                return ""
+            return os.path.basename(buf.value)
+        finally:
+            _kernel32.CloseHandle(handle)
+
 # --- Linux/macOS: pynput (bancada) ------------------------------------------
 
 else:
@@ -160,4 +193,7 @@ else:
         _teclado.release(Key.enter)
 
     def janela_em_foco() -> str:
+        return ""
+
+    def processo_em_foco() -> str:
         return ""

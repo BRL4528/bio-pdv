@@ -95,8 +95,10 @@ def main() -> int:
         anterior = _worker_sync_ref[0]
         if anterior is not None and anterior.isRunning():
             return
-        worker = _WorkerSync(vault.ultima_sincronizacao)
-        worker.concluido.connect(vault.aplica_sincronizacao)
+        worker = _WorkerSync(vault.ultima_sincronizacao, vault.ultima_sincronizacao_apps)
+        worker.concluido.connect(
+            lambda registros, apps: (vault.aplica_sincronizacao(registros),
+                                     vault.aplica_apps_autorizados(apps)))
         worker.start()
         _worker_sync_ref[0] = worker
 

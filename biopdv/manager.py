@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
     QSpinBox, QTableWidget, QTableWidgetItem, QTabWidget, QVBoxLayout, QWidget,
 )
 
-from . import audit, reader as rd, sync, updater
+from . import audit, inject, reader as rd, sync, updater
 from .sync import NaoAutorizado, SyncError
 from .vault import Vault, gera_senha
 from .worker import LeitorWorker
@@ -48,18 +48,22 @@ class _WorkerUpdate(QThread):
 
 
 class _WorkerSync(QThread):
-    """Pull incremental de supervisores, fora da thread da interface."""
+    """Pull incremental de supervisores + apps autorizados, fora da thread
+    da interface."""
 
-    concluido = Signal(list)    # list[sync.RegistroSupervisor]
+    concluido = Signal(list, list)  # list[RegistroSupervisor], list[RegistroAppAutorizado]
     falhou = Signal(str)
 
-    def __init__(self, desde: str | None):
+    def __init__(self, desde_supervisores: str | None, desde_apps: str | None):
         super().__init__()
-        self.desde = desde
+        self.desde_supervisores = desde_supervisores
+        self.desde_apps = desde_apps
 
     def run(self):
         try:
-            self.concluido.emit(sync.sincronizar(self.desde))
+            supervisores = sync.sincronizar(self.desde_supervisores)
+            apps = sync.sincronizar_apps(self.desde_apps)
+            self.concluido.emit(supervisores, apps)
         except Exception as exc:
             self.falhou.emit(str(exc))
 
@@ -184,6 +188,59 @@ class DialogoConfigurarSincronizacao(QDialog):
             return
         QMessageBox.information(
             self, "Configurado", f"Este PDV ('{nome}') esta pronto para sincronizar.")
+        self.accept()
+
+
+class DialogoAutorizarApp(QDialog):
+    """Cadastra um executavel na lista sincronizada de apps autorizados."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Autorizar aplicativo")
+        self.setMinimumWidth(400)
+
+        self.executavel = QLineEdit()
+        self.executavel.setPlaceholderText("Ex.: pdvfrente.exe")
+        btn_detectar = QPushButton("Detectar processo em foco agora")
+        btn_detectar.clicked.connect(self._detecta)
+        self.descricao = QLineEdit()
+        self.descricao.setPlaceholderText("Ex.: PDV da loja Sede")
+
+        form = QFormLayout()
+        form.addRow("Executavel:", self.executavel)
+        form.addRow("", btn_detectar)
+        form.addRow("Descricao:", self.descricao)
+
+        aviso = QLabel(
+            "Deixe o programa do PDV aberto e em foco (na frente de tudo) "
+            "antes de clicar em 'Detectar'."
+        )
+        aviso.setWordWrap(True)
+        aviso.setStyleSheet("color:#555; font-size:11px;")
+
+        botoes = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        botoes.accepted.connect(self._confirma)
+        botoes.rejected.connect(self.reject)
+
+        lay = QVBoxLayout(self)
+        lay.addLayout(form)
+        lay.addWidget(aviso)
+        lay.addWidget(botoes)
+
+    def _detecta(self):
+        processo = inject.processo_em_foco()
+        if not processo:
+            QMessageBox.warning(
+                self, "Nao detectado",
+                "Nao consegui identificar o processo em foco (ou este "
+                "recurso so funciona no Windows). Digite o nome manualmente.")
+            return
+        self.executavel.setText(processo)
+
+    def _confirma(self):
+        if not self.executavel.text().strip():
+            QMessageBox.warning(self, "Faltam dados", "Informe o executavel.")
+            return
         self.accept()
 
 
@@ -386,11 +443,13 @@ class JanelaGestao(QMainWindow):
 
         abas = QTabWidget()
         abas.addTab(self._aba_supervisores(), "Supervisores")
+        abas.addTab(self._aba_apps_autorizados(), "Apps autorizados")
         abas.addTab(self._aba_auditoria(), "Auditoria")
         abas.addTab(self._aba_leitor(), "Leitor")
         abas.addTab(self._aba_atualizacao(), "Atualizar")
         self.setCentralWidget(abas)
         self.atualiza()
+        self.atualiza_apps()
 
     # --- sessao / sincronizacao ----------------------------------------------
 
@@ -499,18 +558,21 @@ class JanelaGestao(QMainWindow):
                 self.base_url = dispositivo["base_url"]
 
     def _sincronizar_agora(self):
-        self._worker_sync = _WorkerSync(self.vault.ultima_sincronizacao)
+        self._worker_sync = _WorkerSync(
+            self.vault.ultima_sincronizacao, self.vault.ultima_sincronizacao_apps)
         self._worker_sync.concluido.connect(self._sync_concluida)
         self._worker_sync.falhou.connect(
             lambda m: self.status_sync.setText(f"Falha na sincronizacao: {m}"))
         self._worker_sync.start()
 
-    def _sync_concluida(self, registros):
+    def _sync_concluida(self, registros, apps):
         self.vault.aplica_sincronizacao(registros)
+        self.vault.aplica_apps_autorizados(apps)
         self.status_sync.setText(
             f"Ultima sincronizacao: {self.vault.ultima_sincronizacao} "
-            f"({len(registros)} atualizados)")
+            f"({len(registros)} supervisores, {len(apps)} apps atualizados)")
         self.atualiza()
+        self.atualiza_apps()
 
     # --- aba supervisores: acoes ---------------------------------------------
 
@@ -664,6 +726,101 @@ class JanelaGestao(QMainWindow):
             lambda m: QMessageBox.warning(self, "Erro", m))
         worker.start()
         self._worker_excluir = worker  # segura a referencia
+
+    # --- aba apps autorizados ------------------------------------------------
+
+    def _aba_apps_autorizados(self) -> QWidget:
+        w = QWidget()
+        lay = QVBoxLayout(w)
+
+        aviso = QLabel(
+            "Antes de digitar a senha, o agente confere se o programa em foco "
+            "esta nesta lista (pelo nome do executavel, nao pelo titulo da "
+            "janela -- titulo qualquer programa pode reescrever).\n\n"
+            "Lista vazia = checagem desativada (a senha pode ser digitada em "
+            "qualquer janela, como antes desta funcao existir)."
+        )
+        aviso.setWordWrap(True)
+        aviso.setStyleSheet("color:#555; font-size:11px;")
+        lay.addWidget(aviso)
+
+        self.tabela_apps = QTableWidget(0, 3)
+        self.tabela_apps.setHorizontalHeaderLabels(
+            ["Executavel", "Descricao", "Autorizado em"])
+        self.tabela_apps.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        self.tabela_apps.setSelectionBehavior(QTableWidget.SelectRows)
+        self.tabela_apps.setEditTriggers(QTableWidget.NoEditTriggers)
+
+        self.btn_autorizar_app = QPushButton("Autorizar aplicativo")
+        self.btn_autorizar_app.clicked.connect(self._autorizar_app)
+        self.btn_remover_app = QPushButton("Remover")
+        self.btn_remover_app.setStyleSheet("color:#b00;")
+        self.btn_remover_app.clicked.connect(self._remover_app)
+        self._acoes_admin = self._acoes_admin + (self.btn_autorizar_app, self.btn_remover_app)
+        self.btn_autorizar_app.setEnabled(False)
+        self.btn_remover_app.setEnabled(False)
+
+        barra = QHBoxLayout()
+        barra.addWidget(self.btn_autorizar_app)
+        barra.addStretch()
+        barra.addWidget(self.btn_remover_app)
+
+        lay.addLayout(barra)
+        lay.addWidget(self.tabela_apps)
+        return w
+
+    def atualiza_apps(self):
+        apps = self.vault.apps_autorizados()
+        self.tabela_apps.setRowCount(len(apps))
+        for i, (executavel, descricao) in enumerate(apps):
+            atualizado = self.vault._apps.get(executavel, {}).get("atualizado_em", "")
+            for col, val in enumerate([executavel, descricao, atualizado]):
+                self.tabela_apps.setItem(i, col, QTableWidgetItem(val))
+
+    def _autorizar_app(self):
+        if not self._exige_admin():
+            return
+        dlg = DialogoAutorizarApp(self)
+        if not dlg.exec():
+            return
+        executavel, descricao = dlg.executavel.text().strip(), dlg.descricao.text().strip()
+        try:
+            sync.enviar_app_autorizado(self.base_url, self.token_admin, executavel, descricao)
+        except SyncError as exc:
+            QMessageBox.warning(
+                self, "Falhou ao sincronizar",
+                f"Nao consegui autorizar '{executavel}' no servidor central: {exc}\n\n"
+                "Nada foi salvo -- tente de novo quando a rede voltar.")
+            return
+        audit.registra("app_autorizado", executavel=executavel)
+        self._sincronizar_agora()
+        QMessageBox.information(
+            self, "Autorizado",
+            f"'{executavel}' autorizado em todos os PDVs sincronizados.")
+
+    def _remover_app(self):
+        if not self._exige_admin():
+            return
+        linha = self.tabela_apps.currentRow()
+        if linha < 0:
+            QMessageBox.information(self, "Selecione", "Escolha um app na lista.")
+            return
+        executavel = self.tabela_apps.item(linha, 0).text()
+        r = QMessageBox.question(
+            self, "Remover app autorizado",
+            f"Remover '{executavel}' da lista em TODOS os PDVs sincronizados?\n\n"
+            "Se essa remocao deixar a lista vazia, a checagem volta a ficar "
+            "desativada (senha digitada em qualquer janela).",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if r != QMessageBox.Yes:
+            return
+        try:
+            sync.remover_app_autorizado(self.base_url, self.token_admin, executavel)
+        except SyncError as exc:
+            QMessageBox.warning(self, "Falhou ao sincronizar", str(exc))
+            return
+        audit.registra("app_removido", executavel=executavel)
+        self._sincronizar_agora()
 
     # --- aba auditoria ------------------------------------------------------
 

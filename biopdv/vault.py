@@ -91,6 +91,8 @@ class Vault:
         self._indices: dict[str, dict] = {}       # indice -> {login, criado_em}
         self._supervisores: dict[str, dict] = {}   # login -> {nome, senha, ativo, atualizado_em, nunca_enviado?}
         self._ultima_sincronizacao: str | None = None
+        self._apps: dict[str, dict] = {}           # executavel (minusculo) -> {descricao, ativo, atualizado_em}
+        self._ultima_sincronizacao_apps: str | None = None
         self.carrega()
 
     @property
@@ -102,11 +104,17 @@ class Vault:
     def ultima_sincronizacao(self) -> str | None:
         return self._ultima_sincronizacao
 
+    @property
+    def ultima_sincronizacao_apps(self) -> str | None:
+        return self._ultima_sincronizacao_apps
+
     def carrega(self):
         if not os.path.exists(self.caminho):
             self._indices = {}
             self._supervisores = {}
             self._ultima_sincronizacao = None
+            self._apps = {}
+            self._ultima_sincronizacao_apps = None
             return
 
         with open(self.caminho, encoding="utf-8") as f:
@@ -116,6 +124,8 @@ class Vault:
             self._indices = bruto.get("indices", {})
             self._supervisores = bruto.get("supervisores", {})
             self._ultima_sincronizacao = bruto.get("ultima_sincronizacao")
+            self._apps = bruto.get("apps_autorizados", {})
+            self._ultima_sincronizacao_apps = bruto.get("ultima_sincronizacao_apps")
             return
 
         # Formato antigo (v1): {indice: {nome, login, senha, criado_em}}.
@@ -124,6 +134,8 @@ class Vault:
         # servidor central, pra nao perder os cadastros ja feitos.
         self._indices = {}
         self._supervisores = {}
+        self._apps = {}
+        self._ultima_sincronizacao_apps = None
         for indice, registro in bruto.items():
             login = registro.get("login") or f"pdv-legado-{indice}"
             self._indices[indice] = {
@@ -148,6 +160,8 @@ class Vault:
                 "indices": self._indices,
                 "supervisores": self._supervisores,
                 "ultima_sincronizacao": self._ultima_sincronizacao,
+                "apps_autorizados": self._apps,
+                "ultima_sincronizacao_apps": self._ultima_sincronizacao_apps,
             }, f, indent=2, ensure_ascii=False)
         os.replace(tmp, self.caminho)
         if not WINDOWS:
@@ -270,3 +284,40 @@ class Vault:
         if sup:
             sup.pop("nunca_enviado", None)
             self.salva()
+
+    # --- apps autorizados (lista de executaveis que podem receber a senha) --
+
+    def aplica_apps_autorizados(self, registros: list) -> None:
+        """Sobrescreve o cache com o que o servidor mandou. `registros` e
+        uma lista de sync.RegistroAppAutorizado."""
+        cursor = self._ultima_sincronizacao_apps
+        for r in registros:
+            self._apps[r.executavel.lower()] = {
+                "descricao": r.descricao, "ativo": r.ativo,
+                "atualizado_em": r.atualizado_em,
+            }
+            if cursor is None or r.atualizado_em > cursor:
+                cursor = r.atualizado_em
+        if cursor is not None:
+            self._ultima_sincronizacao_apps = cursor
+        self.salva()
+
+    def apps_autorizados(self) -> list[tuple[str, str]]:
+        """(executavel, descricao) dos apps ativos -- para a tela de gestao."""
+        return sorted(
+            (executavel, app["descricao"])
+            for executavel, app in self._apps.items()
+            if app.get("ativo", True)
+        )
+
+    def app_permitido(self, processo: str) -> bool:
+        """True se o agente pode digitar a senha nesse processo.
+
+        Fail-open: lista vazia = checagem desativada (comportamento de
+        antes desta feature existir). So passa a bloquear depois que o
+        admin cadastrar pelo menos um app.
+        """
+        ativos = [e for e, a in self._apps.items() if a.get("ativo", True)]
+        if not ativos:
+            return True
+        return bool(processo) and processo.lower() in ativos

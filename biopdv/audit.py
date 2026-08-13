@@ -22,7 +22,7 @@ MAQUINA = socket.gethostname()
 # politica de monitoramento de equipamento/ciencia do funcionario formalizada
 # pela empresa (LGPD). Ver nota em captura.py.
 EVENTOS_COM_CAPTURA = {
-    "autorizacao_concedida", "autorizacao_negada",
+    "autorizacao_concedida", "autorizacao_negada", "autorizacao_bloqueada_app",
     "cadastro", "troca_senha", "exclusao",
 }
 

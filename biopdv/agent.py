@@ -115,12 +115,14 @@ class AgentePDV:
             return
         self.ocupado = True
         self.botao.define_estado(LENDO, "Encoste")
-        janela = ""
+        janela, processo = "", ""
         try:
             janela = inject.janela_em_foco()
+            processo = inject.processo_em_foco()
         except Exception:
             pass
         self._janela_alvo = janela
+        self._processo_alvo = processo
 
         self.worker = LeitorWorker(self.porta, "identify", timeout=self.timeout)
         self.worker.progresso.connect(self._progresso)
@@ -151,6 +153,14 @@ class AgentePDV:
             audit.registra("autorizacao_sem_cadastro", indice=res.indice,
                            janela=self._janela_alvo)
             self._volta_ocioso(2500)
+            return
+
+        if not self.vault.app_permitido(self._processo_alvo):
+            self.botao.define_estado(ERRO, "Bloq. app")
+            audit.registra_com_captura(
+                "autorizacao_bloqueada_app", indice=res.indice, login=reg.login,
+                processo=self._processo_alvo, janela=self._janela_alvo)
+            self._volta_ocioso(3500)
             return
 
         try:

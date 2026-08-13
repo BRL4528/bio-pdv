@@ -45,6 +45,14 @@ class RegistroSupervisor:
     atualizado_em: str
 
 
+@dataclass
+class RegistroAppAutorizado:
+    executavel: str
+    descricao: str
+    ativo: bool
+    atualizado_em: str
+
+
 # --- configuracao local do dispositivo --------------------------------------
 
 
@@ -165,3 +173,39 @@ def sincronizar(desde: str | None = None) -> list[RegistroSupervisor]:
         "GET", url, {"X-Pdv-Token": dispositivo["device_token"]},
     )
     return [RegistroSupervisor(**item) for item in (resposta or [])]
+
+
+# --- apps autorizados (lista de executaveis que podem receber a senha) -----
+
+
+def enviar_app_autorizado(base_url: str, token_admin: str, executavel: str, descricao: str) -> None:
+    _requisicao(
+        "POST", f"{base_url.rstrip('/')}/pdv-apps-autorizados",
+        {"Authorization": f"Bearer {token_admin}"},
+        {"executavel": executavel, "descricao": descricao},
+    )
+
+
+def remover_app_autorizado(base_url: str, token_admin: str, executavel: str) -> None:
+    _requisicao(
+        "DELETE", f"{base_url.rstrip('/')}/pdv-apps-autorizados/{executavel}",
+        {"Authorization": f"Bearer {token_admin}"},
+    )
+
+
+def sincronizar_apps(desde: str | None = None) -> list[RegistroAppAutorizado]:
+    """Pull incremental dos apps autorizados, mesmo token de leitura desta maquina."""
+    dispositivo = dispositivo_configurado()
+    if dispositivo is None:
+        raise SyncError("este PDV ainda nao foi configurado (sem token de sincronizacao)")
+
+    url = f"{dispositivo['base_url']}/pdv-apps-autorizados"
+    if desde:
+        url += f"?desde={desde}"
+
+    resposta = _requisicao(
+        "GET", url, {"X-Pdv-Token": dispositivo["device_token"]},
+    )
+    campos = {"executavel", "descricao", "ativo", "atualizado_em"}
+    return [RegistroAppAutorizado(**{k: v for k, v in item.items() if k in campos})
+            for item in (resposta or [])]
