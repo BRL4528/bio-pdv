@@ -1,16 +1,24 @@
-"""Tela de gestao: cadastrar supervisor, ver cadastrados, excluir, auditoria."""
+"""Tela de gestao: cadastrar supervisor, ver cadastrados, excluir, auditoria.
+
+Quem pode cadastrar/trocar senha/excluir e definido pelo login no ERP
+(samasc-api, POST /sessions): so quem tem tag=='admin' desbloqueia essas
+acoes. A sessao vive so em memoria enquanto esta janela estiver aberta --
+nao fica salva em disco. Quem nao e admin so consulta a aba Auditoria.
+"""
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtCore import Qt, QThread, QUrl, Signal
+from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout, QGroupBox,
-    QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMainWindow, QMessageBox,
-    QPlainTextEdit, QProgressBar, QPushButton, QSpinBox, QTableWidget,
-    QTableWidgetItem, QTabWidget, QVBoxLayout, QWidget,
+    QButtonGroup, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout,
+    QGroupBox, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMainWindow,
+    QMessageBox, QPlainTextEdit, QProgressBar, QPushButton, QRadioButton,
+    QSpinBox, QTableWidget, QTableWidgetItem, QTabWidget, QVBoxLayout, QWidget,
 )
 
-from . import audit, reader as rd, updater
+from . import audit, reader as rd, sync, updater
+from .sync import NaoAutorizado, SyncError
 from .vault import Vault, gera_senha
 from .worker import LeitorWorker
 
@@ -39,17 +47,178 @@ class _WorkerUpdate(QThread):
             self.falhou.emit(str(exc))
 
 
-class DialogoCadastro(QDialog):
-    """Coleta nome/login/senha e conduz as 3 capturas do dedo."""
+class _WorkerSync(QThread):
+    """Pull incremental de supervisores, fora da thread da interface."""
 
-    def __init__(self, porta: str, vault: Vault, parent=None):
+    concluido = Signal(list)    # list[sync.RegistroSupervisor]
+    falhou = Signal(str)
+
+    def __init__(self, desde: str | None):
+        super().__init__()
+        self.desde = desde
+
+    def run(self):
+        try:
+            self.concluido.emit(sync.sincronizar(self.desde))
+        except Exception as exc:
+            self.falhou.emit(str(exc))
+
+
+class DialogoLoginAdmin(QDialog):
+    """Login no ERP (samasc-api). access['tag']=='admin' libera a gestao."""
+
+    def __init__(self, base_url: str, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Entrar")
+        self.setMinimumWidth(360)
+        self.access = None
+        self.token = None
+
+        self.url = QLineEdit(base_url)
+        self.url.setPlaceholderText("https://api.samasc.cooasgo.com.br")
+        self.nickname = QLineEdit()
+        self.nickname.setPlaceholderText("usuario do ERP")
+        self.senha = QLineEdit()
+        self.senha.setEchoMode(QLineEdit.Password)
+
+        form = QFormLayout()
+        form.addRow("Servidor:", self.url)
+        form.addRow("Usuario:", self.nickname)
+        form.addRow("Senha:", self.senha)
+
+        self.status = QLabel("")
+        self.status.setWordWrap(True)
+        self.status.setStyleSheet("color:#b00; font-size:11px;")
+
+        btn_entrar = QPushButton("Entrar")
+        btn_entrar.clicked.connect(self._tenta_login)
+        cancelar = QDialogButtonBox(QDialogButtonBox.Cancel)
+        cancelar.rejected.connect(self.reject)
+
+        lay = QVBoxLayout(self)
+        lay.addLayout(form)
+        lay.addWidget(self.status)
+        lay.addWidget(btn_entrar)
+        lay.addWidget(cancelar)
+
+    def _tenta_login(self):
+        base_url = self.url.text().strip()
+        if not base_url or not self.nickname.text().strip() or not self.senha.text():
+            self.status.setText("Preencha servidor, usuario e senha.")
+            return
+        try:
+            self.access, self.token = sync.login_erp(
+                base_url, self.nickname.text().strip(), self.senha.text())
+        except NaoAutorizado:
+            self.status.setText("Usuario ou senha incorretos.")
+            return
+        except SyncError as exc:
+            self.status.setText(str(exc))
+            return
+        self.base_url_usado = base_url
+        self.accept()
+
+
+class DialogoConfigurarSincronizacao(QDialog):
+    """Provisiona o token de leitura DESTA maquina (uma vez por instalacao)."""
+
+    def __init__(self, base_url: str, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Configurar sincronizacao deste PDV")
+        self.setMinimumWidth(400)
+
+        self.url = QLineEdit(base_url)
+        self.nickname = QLineEdit()
+        self.nickname.setPlaceholderText("usuario admin do ERP")
+        self.senha = QLineEdit()
+        self.senha.setEchoMode(QLineEdit.Password)
+        self.nome_pdv = QLineEdit()
+        self.nome_pdv.setPlaceholderText("Ex.: Caixa 3 - Loja Sede")
+
+        form = QFormLayout()
+        form.addRow("Servidor:", self.url)
+        form.addRow("Usuario admin:", self.nickname)
+        form.addRow("Senha:", self.senha)
+        form.addRow("Nome deste PDV:", self.nome_pdv)
+
+        aviso = QLabel(
+            "Precisa de um login com permissao de administrador no ERP. "
+            "Isso e feito uma vez por maquina -- o token gerado fica "
+            "guardado localmente e cifrado."
+        )
+        aviso.setWordWrap(True)
+        aviso.setStyleSheet("color:#555; font-size:11px;")
+
+        self.status = QLabel("")
+        self.status.setWordWrap(True)
+        self.status.setStyleSheet("color:#b00; font-size:11px;")
+
+        btn = QPushButton("Configurar")
+        btn.clicked.connect(self._configura)
+        cancelar = QDialogButtonBox(QDialogButtonBox.Cancel)
+        cancelar.rejected.connect(self.reject)
+
+        lay = QVBoxLayout(self)
+        lay.addLayout(form)
+        lay.addWidget(aviso)
+        lay.addWidget(self.status)
+        lay.addWidget(btn)
+        lay.addWidget(cancelar)
+
+    def _configura(self):
+        base_url = self.url.text().strip()
+        nome = self.nome_pdv.text().strip()
+        if not base_url or not self.nickname.text().strip() or not self.senha.text() or not nome:
+            self.status.setText("Preencha todos os campos.")
+            return
+        try:
+            access, token = sync.login_erp(
+                base_url, self.nickname.text().strip(), self.senha.text())
+            if not sync.eh_admin(access):
+                self.status.setText(
+                    "Este usuario nao tem permissao de administrador no ERP.")
+                return
+            sync.provisionar_dispositivo(base_url, token, nome)
+        except (NaoAutorizado, SyncError) as exc:
+            self.status.setText(str(exc))
+            return
+        QMessageBox.information(
+            self, "Configurado", f"Este PDV ('{nome}') esta pronto para sincronizar.")
+        self.accept()
+
+
+class DialogoCadastro(QDialog):
+    """Coleta nome/login/senha (ou reaproveita um supervisor ja sincronizado)
+    e conduz as capturas do dedo NESTE leitor."""
+
+    def __init__(self, porta: str, vault: Vault, base_url: str, token_admin: str, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Cadastrar supervisor")
         self.setMinimumWidth(460)
         self.porta = porta
         self.vault = vault
+        self.base_url = base_url
+        self.token_admin = token_admin
         self.worker: LeitorWorker | None = None
         self.resultado = None
+
+        self.radio_novo = QRadioButton("Novo supervisor")
+        self.radio_vincular = QRadioButton("Vincular supervisor ja cadastrado")
+        self.radio_novo.setChecked(True)
+        grupo = QButtonGroup(self)
+        grupo.addButton(self.radio_novo)
+        grupo.addButton(self.radio_vincular)
+        grupo.buttonToggled.connect(lambda *_: self._alterna_modo())
+
+        self.existentes = self.vault.nao_vinculados()
+        self.combo_existentes = QComboBox()
+        for login, nome in self.existentes:
+            self.combo_existentes.addItem(f"{nome} ({login})", login)
+        if not self.existentes:
+            self.radio_vincular.setEnabled(False)
+            self.radio_vincular.setToolTip(
+                "Nenhum supervisor sincronizado ainda sem digital cadastrada neste leitor.")
+        self.combo_existentes.setEnabled(False)
 
         self.nome = QLineEdit()
         self.nome.setPlaceholderText("Ex.: Maria Souza")
@@ -75,15 +244,20 @@ class DialogoCadastro(QDialog):
         self.aquisicoes.setValue(3)
         self.aquisicoes.setToolTip("3 capturas = mais preciso. 1 = mais rapido.")
 
-        form = QFormLayout()
-        form.addRow("Nome:", self.nome)
-        form.addRow("Login no PDV:", self.login)
-        form.addRow("Senha do PDV:", linha_senha)
-        form.addRow("Capturas:", self.aquisicoes)
+        self.form = QFormLayout()
+        self.form.addRow("Nome:", self.nome)
+        self.form.addRow("Login no PDV:", self.login)
+        self.form.addRow("Senha do PDV:", linha_senha)
+        self.linha_existentes = QLabel("Supervisor:")
+        self.form.addRow(self.linha_existentes, self.combo_existentes)
+        self.form.addRow("Capturas:", self.aquisicoes)
+        self._alterna_modo()
 
         aviso = QLabel(
-            "Esta senha precisa ser a MESMA cadastrada no PDV para este login.\n"
-            "Como o agente digita sozinho, ninguem precisa decorar — pode ser aleatoria."
+            "No modo Novo, esta senha precisa ser a MESMA cadastrada no PDV "
+            "para este login -- pode ser aleatoria, ja que o agente digita "
+            "sozinho. No modo Vincular, so a digital e nova; senha e nome ja "
+            "vieram sincronizados de outro PDV."
         )
         aviso.setWordWrap(True)
         aviso.setStyleSheet("color:#555; font-size:11px;")
@@ -99,30 +273,49 @@ class DialogoCadastro(QDialog):
         botoes.rejected.connect(self.reject)
 
         lay = QVBoxLayout(self)
-        lay.addLayout(form)
+        modos = QHBoxLayout()
+        modos.addWidget(self.radio_novo)
+        modos.addWidget(self.radio_vincular)
+        lay.addLayout(modos)
+        lay.addLayout(self.form)
         lay.addWidget(aviso)
         lay.addWidget(self.status)
         lay.addWidget(self.btn_iniciar)
         lay.addWidget(botoes)
 
+    def _alterna_modo(self):
+        novo = self.radio_novo.isChecked()
+        self.nome.setEnabled(novo)
+        self.login.setEnabled(novo)
+        self.senha.setEnabled(novo)
+        self.ver.setEnabled(novo)
+        self.combo_existentes.setEnabled(not novo)
+
     def inicia(self):
-        nome = self.nome.text().strip()
-        login = self.login.text().strip()
-        if not nome or not login:
-            QMessageBox.warning(self, "Faltam dados", "Preencha nome e login.")
-            return
-        if self.vault.existe_login(login):
-            QMessageBox.warning(self, "Login repetido",
-                                f"Ja existe cadastro para o login '{login}'.")
-            return
-        if not self.senha.text():
-            QMessageBox.warning(self, "Faltam dados", "Defina a senha do PDV.")
-            return
+        if self.radio_novo.isChecked():
+            nome = self.nome.text().strip()
+            login = self.login.text().strip()
+            if not nome or not login:
+                QMessageBox.warning(self, "Faltam dados", "Preencha nome e login.")
+                return
+            if self.vault.existe_login(login):
+                QMessageBox.warning(self, "Login repetido",
+                                    f"Ja existe cadastro para o login '{login}'.")
+                return
+            if not self.senha.text():
+                QMessageBox.warning(self, "Faltam dados", "Defina a senha do PDV.")
+                return
+            self._login_alvo = login
+        else:
+            if self.combo_existentes.currentIndex() < 0:
+                QMessageBox.warning(self, "Selecione", "Escolha um supervisor da lista.")
+                return
+            self._login_alvo = self.combo_existentes.currentData()
 
         self.btn_iniciar.setEnabled(False)
         self.status.setText("Encoste o dedo no leitor...")
         self.worker = LeitorWorker(
-            self.porta, "enroll", user_id=login,
+            self.porta, "enroll", user_id=self._login_alvo,
             aquisicoes=self.aquisicoes.value(), timeout=30,
         )
         self.worker.progresso.connect(self.status.setText)
@@ -139,15 +332,37 @@ class DialogoCadastro(QDialog):
         if not res.ok:
             self.status.setText(f"Falhou: {res.mensagem}")
             return
-        nome, login = self.nome.text().strip(), self.login.text().strip()
-        self.vault.adicionar(res.indice, nome, login, self.senha.text())
-        audit.registra("cadastro", indice=res.indice, login=login, nome=nome)
-        self.resultado = res
-        QMessageBox.information(
-            self, "Cadastrado",
-            f"{nome} cadastrado com sucesso.\n\n"
-            f"Indice na base do leitor: {res.indice}\n\n"
-            "Confirme que esta senha esta configurada no PDV para este login.")
+
+        if self.radio_novo.isChecked():
+            nome, login = self.nome.text().strip(), self.login.text().strip()
+            senha = self.senha.text()
+            self.vault.adicionar(res.indice, nome, login, senha)
+            aviso_sync = ""
+            try:
+                sync.enviar_supervisor(self.base_url, self.token_admin, login, nome, senha)
+            except SyncError as exc:
+                aviso_sync = (f"\n\nATENCAO: ficou salvo so neste PDV -- falhou "
+                              f"ao sincronizar com o servidor central: {exc}")
+            audit.registra_com_captura("cadastro", indice=res.indice, login=login, nome=nome)
+            self.resultado = res
+            QMessageBox.information(
+                self, "Cadastrado",
+                f"{nome} cadastrado com sucesso.\n\n"
+                f"Indice na base do leitor: {res.indice}\n\n"
+                "Confirme que esta senha esta configurada no PDV para este login."
+                + aviso_sync)
+        else:
+            login = self._login_alvo
+            self.vault.vincular(res.indice, login)
+            nome = self.combo_existentes.currentText()
+            audit.registra_com_captura("cadastro", indice=res.indice, login=login,
+                                       nome=nome, vinculo=True)
+            self.resultado = res
+            QMessageBox.information(
+                self, "Vinculado",
+                f"Digital vinculada a '{nome}' neste PDV.\n\n"
+                f"Indice na base do leitor: {res.indice}")
+
         self.accept()
 
     def erro(self, msg):
@@ -160,8 +375,14 @@ class JanelaGestao(QMainWindow):
         super().__init__()
         self.porta = porta
         self.vault = vault
+        self.access = None
+        self.token_admin = None
+        dispositivo = sync.dispositivo_configurado()
+        self.base_url = dispositivo["base_url"] if dispositivo else ""
+        self._worker_sync: _WorkerSync | None = None
+
         self.setWindowTitle("bio-pdv — Gestao de supervisores")
-        self.resize(760, 520)
+        self.resize(780, 560)
 
         abas = QTabWidget()
         abas.addTab(self._aba_supervisores(), "Supervisores")
@@ -171,11 +392,34 @@ class JanelaGestao(QMainWindow):
         self.setCentralWidget(abas)
         self.atualiza()
 
-    # --- aba supervisores ---------------------------------------------------
+    # --- sessao / sincronizacao ----------------------------------------------
 
     def _aba_supervisores(self) -> QWidget:
         w = QWidget()
         lay = QVBoxLayout(w)
+
+        cx_sessao = QGroupBox("Sessao e sincronizacao")
+        cl_sessao = QVBoxLayout(cx_sessao)
+        self.status_sessao = QLabel(
+            "Nao logado — clique em Entrar para cadastrar/editar/excluir supervisores.")
+        self.status_sessao.setWordWrap(True)
+        self.status_sync = QLabel(
+            f"Ultima sincronizacao: {self.vault.ultima_sincronizacao or 'nunca'}")
+        linha_sessao = QHBoxLayout()
+        btn_entrar = QPushButton("Entrar")
+        btn_entrar.clicked.connect(self._entrar)
+        btn_sync = QPushButton("Sincronizar agora")
+        btn_sync.clicked.connect(self._sincronizar_agora)
+        btn_configurar = QPushButton("Configurar este PDV")
+        btn_configurar.clicked.connect(self._configurar_dispositivo)
+        linha_sessao.addWidget(btn_entrar)
+        linha_sessao.addWidget(btn_sync)
+        linha_sessao.addWidget(btn_configurar)
+        linha_sessao.addStretch()
+        cl_sessao.addWidget(self.status_sessao)
+        cl_sessao.addWidget(self.status_sync)
+        cl_sessao.addLayout(linha_sessao)
+        lay.addWidget(cx_sessao)
 
         self.tabela = QTableWidget(0, 4)
         self.tabela.setHorizontalHeaderLabels(
@@ -185,25 +429,90 @@ class JanelaGestao(QMainWindow):
         self.tabela.setSelectionBehavior(QTableWidget.SelectRows)
         self.tabela.setEditTriggers(QTableWidget.NoEditTriggers)
 
-        btn_novo = QPushButton("Cadastrar supervisor")
-        btn_novo.clicked.connect(self.cadastrar)
-        btn_senha = QPushButton("Trocar senha")
-        btn_senha.clicked.connect(self.trocar_senha)
+        self.btn_novo = QPushButton("Cadastrar supervisor")
+        self.btn_novo.clicked.connect(self.cadastrar)
+        self.btn_senha = QPushButton("Trocar senha")
+        self.btn_senha.clicked.connect(self.trocar_senha)
         btn_testar = QPushButton("Testar digital")
         btn_testar.clicked.connect(self.testar)
-        btn_excluir = QPushButton("Excluir")
-        btn_excluir.clicked.connect(self.excluir)
-        btn_excluir.setStyleSheet("color:#b00;")
+        self.btn_excluir = QPushButton("Excluir")
+        self.btn_excluir.clicked.connect(self.excluir)
+        self.btn_excluir.setStyleSheet("color:#b00;")
+        self._acoes_admin = (self.btn_novo, self.btn_senha, self.btn_excluir)
+        for b in self._acoes_admin:
+            b.setEnabled(False)
 
         barra = QHBoxLayout()
-        for b in (btn_novo, btn_senha, btn_testar):
+        for b in (self.btn_novo, self.btn_senha, btn_testar):
             barra.addWidget(b)
         barra.addStretch()
-        barra.addWidget(btn_excluir)
+        barra.addWidget(self.btn_excluir)
 
         lay.addLayout(barra)
         lay.addWidget(self.tabela)
         return w
+
+    def _entrar(self):
+        dlg = DialogoLoginAdmin(self.base_url, self)
+        if not dlg.exec():
+            return
+        self.access, self.token_admin = dlg.access, dlg.token
+        self.base_url = dlg.base_url_usado
+        nome = self.access.get("name", self.access.get("nickname", "?"))
+        if sync.eh_admin(self.access):
+            self.status_sessao.setText(f"Logado como {nome} (administrador).")
+            for b in self._acoes_admin:
+                b.setEnabled(True)
+            self._adota_pendentes()
+        else:
+            self.status_sessao.setText(
+                f"Logado como {nome} — sem permissao de administrador. "
+                "Voce pode consultar a aba Auditoria.")
+            for b in self._acoes_admin:
+                b.setEnabled(False)
+
+    def _adota_pendentes(self):
+        """Envia ao servidor supervisores criados antes de existir sincronizacao."""
+        pendentes = self.vault.pendentes_adocao()
+        if not pendentes:
+            return
+        falharam = []
+        for reg in pendentes:
+            try:
+                sync.enviar_supervisor(self.base_url, self.token_admin,
+                                       reg.login, reg.nome, reg.senha)
+                self.vault.marca_adotado(reg.login)
+            except SyncError:
+                falharam.append(reg.login)
+        if falharam:
+            QMessageBox.warning(
+                self, "Adocao parcial",
+                "Alguns supervisores cadastrados antes da sincronizacao nao "
+                f"puderam ser enviados agora: {', '.join(falharam)}. "
+                "Vao tentar de novo na proxima sincronizacao.")
+
+    def _configurar_dispositivo(self):
+        dlg = DialogoConfigurarSincronizacao(self.base_url, self)
+        if dlg.exec():
+            dispositivo = sync.dispositivo_configurado()
+            if dispositivo:
+                self.base_url = dispositivo["base_url"]
+
+    def _sincronizar_agora(self):
+        self._worker_sync = _WorkerSync(self.vault.ultima_sincronizacao)
+        self._worker_sync.concluido.connect(self._sync_concluida)
+        self._worker_sync.falhou.connect(
+            lambda m: self.status_sync.setText(f"Falha na sincronizacao: {m}"))
+        self._worker_sync.start()
+
+    def _sync_concluida(self, registros):
+        self.vault.aplica_sincronizacao(registros)
+        self.status_sync.setText(
+            f"Ultima sincronizacao: {self.vault.ultima_sincronizacao} "
+            f"({len(registros)} atualizados)")
+        self.atualiza()
+
+    # --- aba supervisores: acoes ---------------------------------------------
 
     def atualiza(self):
         regs = self.vault.listar()
@@ -219,23 +528,44 @@ class JanelaGestao(QMainWindow):
             return None
         return int(self.tabela.item(linha, 0).text())
 
+    def _exige_admin(self) -> bool:
+        if not (self.access and sync.eh_admin(self.access)):
+            QMessageBox.warning(
+                self, "Sem permissao",
+                "Entre com uma conta de administrador do ERP para fazer isso.")
+            return False
+        return True
+
     def cadastrar(self):
-        dlg = DialogoCadastro(self.porta, self.vault, self)
+        if not self._exige_admin():
+            return
+        dlg = DialogoCadastro(self.porta, self.vault, self.base_url, self.token_admin, self)
         if dlg.exec():
             self.atualiza()
 
     def trocar_senha(self):
+        if not self._exige_admin():
+            return
         idx = self._selecionado()
         if idx is None:
+            return
+        reg = next((r for r in self.vault.listar() if r.indice == idx), None)
+        if reg is None:
             return
         nova, ok = self._pede_senha()
         if not ok:
             return
         self.vault.trocar_senha(idx, nova)
-        audit.registra("troca_senha", indice=idx)
+        aviso_sync = ""
+        try:
+            sync.enviar_supervisor(self.base_url, self.token_admin, reg.login, reg.nome, nova)
+        except SyncError as exc:
+            aviso_sync = f"\n\nATENCAO: falhou ao sincronizar com o servidor central: {exc}"
+        audit.registra_com_captura("troca_senha", indice=idx, login=reg.login)
         QMessageBox.information(
             self, "Senha trocada",
-            "Senha atualizada no cofre.\n\nAtualize a MESMA senha no PDV.")
+            "Senha atualizada no cofre e enviada ao servidor central.\n\n"
+            "Atualize a MESMA senha no PDV." + aviso_sync)
 
     def _pede_senha(self) -> tuple[str, bool]:
         dlg = QDialog(self)
@@ -291,16 +621,19 @@ class JanelaGestao(QMainWindow):
         dlg.exec()
 
     def excluir(self):
+        if not self._exige_admin():
+            return
         idx = self._selecionado()
         if idx is None:
             return
         reg = next((r for r in self.vault.listar() if r.indice == idx), None)
         nome = reg.nome if reg else str(idx)
+        login = reg.login if reg else None
         r = QMessageBox.question(
             self, "Excluir supervisor",
             f"Excluir '{nome}' (indice {idx})?\n\n"
-            "A digital sai da base do leitor e a senha sai do cofre.\n"
-            "Nao ha desfazer.",
+            "A digital sai da base deste leitor e o supervisor e desativado "
+            "em TODOS os PDVs sincronizados.\nNao ha desfazer.",
             QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
         if r != QMessageBox.Yes:
             return
@@ -315,9 +648,16 @@ class JanelaGestao(QMainWindow):
                     "O cofre nao foi alterado.")
                 return
             self.vault.remover(idx)
-            audit.registra("exclusao", indice=idx, nome=nome)
+            aviso_sync = ""
+            if login:
+                try:
+                    sync.remover_supervisor(self.base_url, self.token_admin, login)
+                except SyncError as exc:
+                    aviso_sync = (f"\n\nATENCAO: removido so deste PDV -- falhou ao "
+                                  f"desativar no servidor central: {exc}")
+            audit.registra_com_captura("exclusao", indice=idx, nome=nome)
             self.atualiza()
-            QMessageBox.information(self, "Excluido", f"'{nome}' removido.")
+            QMessageBox.information(self, "Excluido", f"'{nome}' removido." + aviso_sync)
 
         worker.concluido.connect(pronto)
         worker.falhou.connect(
@@ -330,23 +670,51 @@ class JanelaGestao(QMainWindow):
     def _aba_auditoria(self) -> QWidget:
         w = QWidget()
         lay = QVBoxLayout(w)
-        self.log = QPlainTextEdit()
-        self.log.setReadOnly(True)
-        self.log.setStyleSheet("font-family:monospace; font-size:12px;")
+
+        barra = QHBoxLayout()
         btn = QPushButton("Atualizar")
         btn.clicked.connect(self.carrega_log)
-        lay.addWidget(btn)
-        lay.addWidget(self.log)
+        btn_captura = QPushButton("Ver captura")
+        btn_captura.clicked.connect(self._ver_captura)
+        barra.addWidget(btn)
+        barra.addWidget(btn_captura)
+        barra.addStretch()
+        lay.addLayout(barra)
+
+        self.tabela_log = QTableWidget(0, 3)
+        self.tabela_log.setHorizontalHeaderLabels(["Quando", "Evento", "Detalhes"])
+        self.tabela_log.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
+        self.tabela_log.setSelectionBehavior(QTableWidget.SelectRows)
+        self.tabela_log.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.tabela_log.doubleClicked.connect(self._ver_captura)
+        lay.addWidget(self.tabela_log)
+
         self.carrega_log()
         return w
 
     def carrega_log(self):
-        linhas = []
-        for e in audit.ultimos(300):
+        eventos = audit.ultimos(300)
+        self.tabela_log.setRowCount(len(eventos))
+        for i, e in enumerate(eventos):
             extra = " ".join(f"{k}={v}" for k, v in e.items()
-                             if k not in ("quando", "evento", "maquina"))
-            linhas.append(f"{e['quando']}  {e['evento']:<16} {extra}")
-        self.log.setPlainText("\n".join(linhas) or "(sem eventos)")
+                             if k not in ("quando", "evento", "maquina", "captura"))
+            item_quando = QTableWidgetItem(e["quando"])
+            item_quando.setData(Qt.UserRole, e)
+            self.tabela_log.setItem(i, 0, item_quando)
+            self.tabela_log.setItem(i, 1, QTableWidgetItem(e["evento"]))
+            self.tabela_log.setItem(i, 2, QTableWidgetItem(extra))
+
+    def _ver_captura(self):
+        linha = self.tabela_log.currentRow()
+        if linha < 0:
+            QMessageBox.information(self, "Selecione", "Escolha uma linha na auditoria.")
+            return
+        evento = self.tabela_log.item(linha, 0).data(Qt.UserRole) or {}
+        caminho = evento.get("captura")
+        if not caminho:
+            QMessageBox.information(self, "Sem captura", "Este evento nao tem captura de tela.")
+            return
+        QDesktopServices.openUrl(QUrl.fromLocalFile(caminho))
 
     # --- aba leitor ---------------------------------------------------------
 

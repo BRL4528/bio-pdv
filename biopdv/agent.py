@@ -140,8 +140,8 @@ class AgentePDV:
         self.ocupado = False
         if not res.ok:
             self.botao.define_estado(ERRO, "Negado")
-            audit.registra("autorizacao_negada", motivo=res.mensagem,
-                           janela=self._janela_alvo)
+            audit.registra_com_captura("autorizacao_negada", motivo=res.mensagem,
+                                       janela=self._janela_alvo)
             self._volta_ocioso(2500)
             return
 
@@ -165,8 +165,8 @@ class AgentePDV:
             return
 
         self.botao.define_estado(OK, reg.nome.split()[0][:8])
-        audit.registra("autorizacao_concedida", indice=res.indice,
-                       login=reg.login, nome=reg.nome, janela=self._janela_alvo)
+        audit.registra_com_captura("autorizacao_concedida", indice=res.indice,
+                                   login=reg.login, nome=reg.nome, janela=self._janela_alvo)
         self._volta_ocioso(2500)
 
     def _falhou(self, msg: str):

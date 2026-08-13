@@ -17,6 +17,15 @@ ARQUIVO = os.path.join(pasta_dados(), "auditoria.jsonl")
 
 MAQUINA = socket.gethostname()
 
+# Eventos sensiveis o suficiente para levar uma captura de tela junto.
+# ATENCAO: a captura e silenciosa no momento (sem aviso na tela) -- exige
+# politica de monitoramento de equipamento/ciencia do funcionario formalizada
+# pela empresa (LGPD). Ver nota em captura.py.
+EVENTOS_COM_CAPTURA = {
+    "autorizacao_concedida", "autorizacao_negada",
+    "cadastro", "troca_senha", "exclusao",
+}
+
 
 def registra(evento: str, **campos):
     linha = {
@@ -29,6 +38,17 @@ def registra(evento: str, **campos):
     linha.update(campos)
     with open(ARQUIVO, "a", encoding="utf-8") as f:
         f.write(json.dumps(linha, ensure_ascii=False) + "\n")
+
+
+def registra_com_captura(evento: str, **campos):
+    """Como registra(), mas anexa uma captura de tela do momento para os
+    eventos em EVENTOS_COM_CAPTURA; fora dessa lista e igual a registra()."""
+    if evento in EVENTOS_COM_CAPTURA:
+        from . import captura
+        caminho = captura.tira_print(evento)
+        if caminho:
+            campos["captura"] = caminho
+    registra(evento, **campos)
 
 
 def ultimos(n: int = 200) -> list[dict]:

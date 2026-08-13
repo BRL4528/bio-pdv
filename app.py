@@ -13,14 +13,16 @@ from __future__ import annotations
 import argparse
 import sys
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QAction, QColor, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import QApplication, QMenu, QMessageBox, QSystemTrayIcon
 
 from biopdv import audit, reader as rd
 from biopdv.agent import AgentePDV
-from biopdv.manager import JanelaGestao
+from biopdv.manager import JanelaGestao, _WorkerSync
 from biopdv.vault import Vault
+
+INTERVALO_SYNC_MS = 120_000  # 2 minutos
 
 try:
     from pynput import keyboard as _kb
@@ -81,6 +83,27 @@ def main() -> int:
     vault = Vault()
     audit.registra("inicio", porta=porta, modo=(
         "gestao" if args.gestao else "agente" if args.agente else "completo"))
+
+    # Sincronizacao em segundo plano: roda em TODOS os modos (inclusive
+    # --agente puro, sem tela de gestao aberta) para que senha trocada num
+    # PDV chegue aos outros sem precisar abrir nada. Silenciosa: se o PDV
+    # ainda nao foi configurado (sem token) ou esta sem rede, so tenta de
+    # novo no proximo ciclo -- nao interrompe o caixa.
+    _worker_sync_ref = [None]
+
+    def _sincroniza_em_segundo_plano():
+        anterior = _worker_sync_ref[0]
+        if anterior is not None and anterior.isRunning():
+            return
+        worker = _WorkerSync(vault.ultima_sincronizacao)
+        worker.concluido.connect(vault.aplica_sincronizacao)
+        worker.start()
+        _worker_sync_ref[0] = worker
+
+    timer_sync = QTimer()
+    timer_sync.timeout.connect(_sincroniza_em_segundo_plano)
+    timer_sync.start(INTERVALO_SYNC_MS)
+    _sincroniza_em_segundo_plano()
 
     janela = None
     if not args.agente:

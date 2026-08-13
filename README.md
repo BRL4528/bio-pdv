@@ -512,6 +512,21 @@ evento que auditoria quer rastreado. Digital que só datilografa uma senha fixa
 não deixa rastro de quem foi — por isso a fase 6. A senha é cifrada com DPAPI,
 nunca em texto puro no disco, e a auditoria nunca grava senha.
 
+### Captura de tela nos eventos sensíveis (`biopdv/captura.py`)
+
+Liberação/negação por digital, cadastro, troca de senha e exclusão de
+supervisor tiram uma captura de tela **silenciosa** (sem aviso na hora) e
+salvam só localmente em `%APPDATA%\bio-pdv\capturas\` — nunca pela rede,
+podada automaticamente depois de 90 dias. É monitoramento de equipamento da
+empresa vinculado a um evento auditável específico, não gravação contínua —
+mesma lógica de uma câmera de segurança sobre o caixa.
+
+⚠️ **Isso exige política de monitoramento de equipamento com ciência formal
+do funcionário (LGPD)** antes de entrar em produção — a captura em si não
+avisa no momento, então a transparência precisa vir de fora do app (contrato
+de trabalho, código de conduta, comunicado interno). Sem isso, não habilite
+esta função.
+
 ### Limitação conhecida: o agente não valida o destino
 
 ⚠️ **O agente digita a senha em qualquer coisa que estiver em foco.** Ele não
