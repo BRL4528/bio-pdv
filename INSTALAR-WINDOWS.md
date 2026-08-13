@@ -59,7 +59,7 @@ Duplo clique em `bio-pdv-setup.exe`. Ele pergunta o tipo de instalação:
 |---|---|---|
 | **PC do caixa** | máquina do PDV | agente: bolha flutuante + atalho `Ctrl+Alt+B` |
 | **PC do administrador** | seu note | só a tela de gestão de supervisores |
-| **Completo** | máquina de teste | os dois |
+| **Completo** | máquina de teste | um atalho único ("bio-pdv (completo)") com bandeja + bolha + gestão no mesmo processo |
 
 No caixa, deixe marcado **"Iniciar o agente junto com o Windows"**.
 

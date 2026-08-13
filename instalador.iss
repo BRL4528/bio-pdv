@@ -42,10 +42,16 @@ Name: "gestao"; Description: "Gestao de supervisores";                   Types: 
 Source: "dist\bio-pdv\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{group}\Gerenciar supervisores"; Filename: "{app}\{#Exe}"; Parameters: "--gestao"; Components: gestao
-Name: "{group}\Agente do PDV";          Filename: "{app}\{#Exe}"; Parameters: "--agente"; Components: agente
+; "Completo" (agente + gestao juntos): um unico atalho SEM parametros --
+; e o modo que junta bandeja + botao flutuante + gestao no mesmo processo
+; (ver docstring de app.py). Os atalhos separados so aparecem quando so UM
+; dos dois componentes foi escolhido.
+Name: "{group}\bio-pdv (completo)";     Filename: "{app}\{#Exe}"; Components: agente and gestao
+Name: "{group}\Gerenciar supervisores"; Filename: "{app}\{#Exe}"; Parameters: "--gestao"; Components: gestao and not agente
+Name: "{group}\Agente do PDV";          Filename: "{app}\{#Exe}"; Parameters: "--agente"; Components: agente and not gestao
 Name: "{group}\Desinstalar {#Nome}";    Filename: "{uninstallexe}"
-Name: "{autodesktop}\Gerenciar supervisores"; Filename: "{app}\{#Exe}"; Parameters: "--gestao"; Tasks: atalhodesktop; Components: gestao
+Name: "{autodesktop}\bio-pdv (completo)";     Filename: "{app}\{#Exe}"; Tasks: atalhodesktop; Components: agente and gestao
+Name: "{autodesktop}\Gerenciar supervisores"; Filename: "{app}\{#Exe}"; Parameters: "--gestao"; Tasks: atalhodesktop; Components: gestao and not agente
 
 [Tasks]
 Name: "atalhodesktop"; Description: "Criar atalho na area de trabalho"; GroupDescription: "Atalhos:"; Components: gestao
@@ -59,8 +65,10 @@ Root: HKLM; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; \
   Flags: uninsdeletevalue; Tasks: autostart
 
 [Run]
+Filename: "{app}\{#Exe}"; Description: "Iniciar o bio-pdv agora"; \
+  Flags: nowait postinstall skipifsilent; Components: agente and gestao
 Filename: "{app}\{#Exe}"; Parameters: "--gestao"; Description: "Abrir a gestao de supervisores agora"; \
-  Flags: nowait postinstall skipifsilent; Components: gestao
+  Flags: nowait postinstall skipifsilent; Components: gestao and not agente
 Filename: "{app}\{#Exe}"; Parameters: "--agente"; Description: "Iniciar o agente agora"; \
   Flags: nowait postinstall skipifsilent; Components: agente and not gestao
 
