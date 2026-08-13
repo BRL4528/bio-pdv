@@ -178,12 +178,18 @@ def sincronizar(desde: str | None = None) -> list[RegistroSupervisor]:
 # --- apps autorizados (lista de executaveis que podem receber a senha) -----
 
 
-def enviar_app_autorizado(base_url: str, token_admin: str, executavel: str, descricao: str) -> None:
-    _requisicao(
+def enviar_app_autorizado(base_url: str, token_admin: str, executavel: str, descricao: str) -> RegistroAppAutorizado:
+    """Devolve o registro salvo (com o atualizado_em de verdade do servidor)
+    para o chamador gravar local na hora, sem depender de uma sincronizacao
+    assincrona separada pra refletir na tela."""
+    resposta = _requisicao(
         "POST", f"{base_url.rstrip('/')}/pdv-apps-autorizados",
         {"Authorization": f"Bearer {token_admin}"},
         {"executavel": executavel, "descricao": descricao},
     )
+    return RegistroAppAutorizado(
+        executavel=resposta["executavel"], descricao=resposta["descricao"],
+        ativo=resposta["ativo"], atualizado_em=resposta["atualizado_em"])
 
 
 def remover_app_autorizado(base_url: str, token_admin: str, executavel: str) -> None:

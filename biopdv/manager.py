@@ -8,7 +8,9 @@ nao fica salva em disco. Quem nao e admin so consulta a aba Auditoria.
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, QThread, QUrl, Signal
+import time
+
+from PySide6.QtCore import Qt, QThread, QTimer, QUrl, Signal
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QButtonGroup, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout,
@@ -201,19 +203,20 @@ class DialogoAutorizarApp(QDialog):
 
         self.executavel = QLineEdit()
         self.executavel.setPlaceholderText("Ex.: pdvfrente.exe")
-        btn_detectar = QPushButton("Detectar processo em foco agora")
-        btn_detectar.clicked.connect(self._detecta)
+        self.btn_detectar = QPushButton("Detectar processo em foco agora")
+        self.btn_detectar.clicked.connect(self._inicia_deteccao)
         self.descricao = QLineEdit()
         self.descricao.setPlaceholderText("Ex.: PDV da loja Sede")
 
         form = QFormLayout()
         form.addRow("Executavel:", self.executavel)
-        form.addRow("", btn_detectar)
+        form.addRow("", self.btn_detectar)
         form.addRow("Descricao:", self.descricao)
 
         aviso = QLabel(
-            "Deixe o programa do PDV aberto e em foco (na frente de tudo) "
-            "antes de clicar em 'Detectar'."
+            "Ao clicar em 'Detectar', esta janela se minimiza e voce tem "
+            "alguns segundos para clicar no programa do PDV antes da leitura "
+            "acontecer -- sem isso, quem fica em foco e esta propria tela."
         )
         aviso.setWordWrap(True)
         aviso.setStyleSheet("color:#555; font-size:11px;")
@@ -227,15 +230,36 @@ class DialogoAutorizarApp(QDialog):
         lay.addWidget(aviso)
         lay.addWidget(botoes)
 
-    def _detecta(self):
-        processo = inject.processo_em_foco()
-        if not processo:
-            QMessageBox.warning(
-                self, "Nao detectado",
-                "Nao consegui identificar o processo em foco (ou este "
-                "recurso so funciona no Windows). Digite o nome manualmente.")
+    def _inicia_deteccao(self):
+        """A janela em foco NO CLIQUE e esta propria -- por isso a deteccao
+        de verdade so roda depois de uma contagem, dando tempo da pessoa
+        trocar para o PDV. Minimiza esta janela nesse intervalo pra nao
+        competir pelo foco."""
+        self._contagem = 5
+        self.btn_detectar.setEnabled(False)
+        self.showMinimized()
+        self._passo_contagem()
+
+    def _passo_contagem(self):
+        if self._contagem <= 0:
+            self.showNormal()
+            self.raise_()
+            self.activateWindow()
+            processo = inject.processo_em_foco()
+            self.btn_detectar.setEnabled(True)
+            self.btn_detectar.setText("Detectar processo em foco agora")
+            if not processo:
+                QMessageBox.warning(
+                    self, "Nao detectado",
+                    "Nao consegui identificar o processo em foco (ou este "
+                    "recurso so funciona no Windows). Digite o nome manualmente.")
+                return
+            self.executavel.setText(processo)
             return
-        self.executavel.setText(processo)
+        self.btn_detectar.setText(
+            f"Clique no PDV agora -- detectando em {self._contagem}s...")
+        self._contagem -= 1
+        QTimer.singleShot(1000, self._passo_contagem)
 
     def _confirma(self):
         if not self.executavel.text().strip():
@@ -785,13 +809,20 @@ class JanelaGestao(QMainWindow):
             return
         executavel, descricao = dlg.executavel.text().strip(), dlg.descricao.text().strip()
         try:
-            sync.enviar_app_autorizado(self.base_url, self.token_admin, executavel, descricao)
+            registro = sync.enviar_app_autorizado(
+                self.base_url, self.token_admin, executavel, descricao)
         except SyncError as exc:
             QMessageBox.warning(
                 self, "Falhou ao sincronizar",
                 f"Nao consegui autorizar '{executavel}' no servidor central: {exc}\n\n"
                 "Nada foi salvo -- tente de novo quando a rede voltar.")
             return
+        # Grava local na hora, com o atualizado_em que o servidor devolveu --
+        # nao depende de uma sincronizacao assincrona separada pra aparecer
+        # na tabela (essa dependencia era o bug: sucesso aparecia mas a
+        # tabela so atualizava se o pull seguinte tambem desse certo).
+        self.vault.aplica_apps_autorizados([registro])
+        self.atualiza_apps()
         audit.registra("app_autorizado", executavel=executavel)
         self._sincronizar_agora()
         QMessageBox.information(
@@ -819,6 +850,13 @@ class JanelaGestao(QMainWindow):
         except SyncError as exc:
             QMessageBox.warning(self, "Falhou ao sincronizar", str(exc))
             return
+        # Mesma logica do autorizar: reflete local na hora, sem esperar o
+        # proximo pull assincrono.
+        descricao_atual = dict(self.vault.apps_autorizados()).get(executavel, "")
+        self.vault.aplica_apps_autorizados([sync.RegistroAppAutorizado(
+            executavel=executavel, descricao=descricao_atual, ativo=False,
+            atualizado_em=time.strftime("%Y-%m-%dT%H:%M:%S"))])
+        self.atualiza_apps()
         audit.registra("app_removido", executavel=executavel)
         self._sincronizar_agora()
 
