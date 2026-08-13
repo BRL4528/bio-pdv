@@ -5,10 +5,14 @@ usando o módulo **Safran/IDEMIA MorphoSmart CBM** tirado de um relógio ponto.
 
 ## Como usar
 
-**No Windows (produção):** veja **[INSTALAR-WINDOWS.md](INSTALAR-WINDOWS.md)** —
-`build-windows.bat` gera o `.exe`, o Inno Setup empacota num
-`bio-pdv-setup.exe` de duplo clique, com atalhos e auto-start. Os PCs de destino
-não precisam de Python.
+**No Windows (produção):** baixe o `bio-pdv-setup.exe` da página de
+**[Releases](https://github.com/BRL4528/bio-pdv/releases)** e dê duplo clique — sem
+Python, sem terminal. Detalhes de instalação (tipos de PC, atalhos, auto-start)
+em **[INSTALAR-WINDOWS.md](INSTALAR-WINDOWS.md)**.
+
+Esse instalador é gerado e publicado automaticamente pelo GitHub Actions a cada
+tag `vX.Y.Z` (build no `windows-latest`: PyInstaller + Inno Setup). Não precisa
+de máquina Windows manual pra tirar uma release.
 
 **Em desenvolvimento:**
 
@@ -446,19 +450,38 @@ antes de instalar. Nada é instalado sem alguém clicar.
 
 ### Publicar uma versão nova
 
+Normal: **bump a versão e tageia** — o resto é automático.
+
 ```bash
-# 1. bump em biopdv/__init__.py -> __version__ = "1.1.0"
-# 2. build-windows.bat            (gera dist/bio-pdv/)
+# 1. bump em biopdv/__init__.py -> __version__ = "1.2.0"
+git commit -am "Versão 1.2.0"
+git tag v1.2.0 && git push --tags
+```
+
+O workflow `.github/workflows/release.yml` builda numa runner `windows-latest`
+(PyInstaller → `.exe`, Inno Setup → `bio-pdv-setup.exe`) e publica a release com
+os três arquivos: `bio-pdv-setup.exe` (o que uma pessoa baixa e instala),
+`bio-pdv-<v>-windows.zip` e `manifest.json` (consumidos só pelo auto-updater
+interno).
+
+Manual, se a Action falhar ou você quiser gerar localmente:
+
+```bash
+# build-windows.bat                (gera dist/bio-pdv/)
+# compile instalador.iss no Inno Setup -> Output/bio-pdv-setup.exe
 python publicar-release.py 1.1.0 --notas "Corrige a digitação no Windows"
 ```
 
 O script zipa o `dist/`, calcula o SHA-256, escreve o `manifest.json` e publica
-tudo via `gh` CLI. Sem o `gh` instalado, ele para e mostra o que subir à mão.
+tudo via `gh` CLI (inclui `Output/bio-pdv-setup.exe` se existir — ou passe
+`--instalador caminho\bio-pdv-setup.exe`). Sem o `gh` instalado, ele para e
+mostra o que subir à mão.
 
-⚠️ **Os dois arquivos são obrigatórios na release** (`bio-pdv-<v>-windows.zip` e
-`manifest.json`). Sem o manifesto o app **recusa** a atualização — é dele que sai
-o hash. E o `__version__` do código tem que bater com a tag, senão o script
-aborta: é por ele que os caixas sabem em que versão estão.
+⚠️ **O zip e o manifest são obrigatórios na release** — sem eles o app
+**recusa** a atualização automática, pois é do manifesto que sai o hash. O
+instalador é o que importa pra quem só quer baixar e instalar do zero. E o
+`__version__` do código tem que bater com a tag, senão o script aborta: é por
+ele que os caixas sabem em que versão estão.
 
 ### Modelo de confiança — o que protege e o que não
 

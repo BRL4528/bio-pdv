@@ -1,0 +1,46 @@
+name: Build e publicar release
+
+# Dispara ao empurrar uma tag "vX.Y.Z". Builda o .exe (PyInstaller), compila o
+# instalador (Inno Setup) e publica os dois na Release — ninguem precisa de
+# Windows/Python na mao pra tirar um bio-pdv-setup.exe pronto pra baixar.
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Instalar dependencias Python
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Gerar o executavel (PyInstaller)
+        run: pyinstaller bio-pdv.spec --noconfirm --clean
+
+      - name: Instalar Inno Setup
+        run: choco install innosetup -y --no-progress
+
+      - name: Compilar o instalador
+        shell: pwsh
+        run: '& "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" instalador.iss'
+
+      - name: Publicar release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >
+          python publicar-release.py "${{ github.ref_name }}"
+          --instalador "Output\bio-pdv-setup.exe"
+          --notas "Build automatico via GitHub Actions"

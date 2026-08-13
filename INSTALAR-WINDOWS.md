@@ -1,13 +1,21 @@
 # Instalar o bio-pdv no Windows
 
-Duas etapas separadas, e só a primeira exige Python:
+## Caminho normal: baixar e instalar
 
-1. **Gerar o instalador** — uma vez, numa máquina qualquer com Python.
-2. **Instalar nos PCs** — duplo clique no `bio-pdv-setup.exe`. Sem Python, sem terminal.
+1. Vá em **[Releases](https://github.com/BRL4528/bio-pdv/releases)** e baixe o
+   **`bio-pdv-setup.exe`** da versão mais recente.
+2. Duplo clique. Sem Python, sem terminal, sem compilar nada.
+
+Pule direto para **"Instalar nos PCs"** mais abaixo.
+
+O `bio-pdv-setup.exe` é gerado e publicado automaticamente (GitHub Actions) a
+cada tag `vX.Y.Z` — ver `.github/workflows/release.yml`. A etapa manual abaixo
+só é necessária se você for desenvolvedor testando uma mudança local antes de
+tagear, ou se a Action falhar e precisar gerar na mão.
 
 ---
 
-## Etapa 1 — Gerar o instalador (uma vez só)
+## Etapa 1 (só para desenvolvimento) — Gerar o instalador manualmente
 
 Numa máquina Windows com **Python 3.10+** ([python.org](https://python.org) — marque
 **"Add Python to PATH"** na instalação):

@@ -7,9 +7,14 @@ Faz, nesta ordem:
   1. confere que biopdv/__init__.py declara a mesma versao
   2. zipa dist/bio-pdv/
   3. calcula o SHA-256 e escreve o manifest.json
-  4. cria a release e sobe os dois arquivos (precisa do gh CLI autenticado)
+  4. cria a release e sobe o zip + manifest + instalador (precisa do gh CLI
+     autenticado)
 
-Sem o gh instalado ele para no passo 3 e voce sobe os arquivos na mao.
+O zip + manifest.json alimentam o auto-updater interno do app (troca em
+silencio, sem instalador). O bio-pdv-setup.exe (Inno Setup, ve --instalador)
+e o que uma pessoa baixa na pagina de Releases e instala com duplo clique — e
+o unico asset obrigatorio pra quem so quer instalar do zero. Sem o gh
+instalado, o script para no passo 3 e voce sobe os arquivos na mao.
 """
 
 from __future__ import annotations
@@ -76,6 +81,9 @@ def main() -> int:
                     help="ex: BRL4528/bio-pdv (padrao: remote do git / updater)")
     ap.add_argument("--rascunho", action="store_true",
                     help="cria como rascunho, para revisar antes de publicar")
+    ap.add_argument("--instalador", default="",
+                    help="caminho do bio-pdv-setup.exe (Inno Setup); se "
+                         "omitido, procura em Output/bio-pdv-setup.exe")
     args = ap.parse_args()
 
     versao = args.versao.lstrip("vV")
@@ -118,23 +126,38 @@ def main() -> int:
     print(f"      {nome_zip}  ({tamanho / 1048576:.1f} MB)")
     print(f"      sha256 {digest}")
 
+    instalador = args.instalador or os.path.join(RAIZ, "Output", "bio-pdv-setup.exe")
+    tem_instalador = os.path.isfile(instalador)
+    if args.instalador and not tem_instalador:
+        sys.exit(f"instalador nao encontrado: {instalador}\n"
+                  "Compile instalador.iss no Inno Setup antes (ou rode sem "
+                  "--instalador se so quer atualizar o auto-updater).")
+    if not tem_instalador:
+        print(f"      [aviso] {instalador} nao existe — a release vai sair sem")
+        print("      o instalador de duplo clique, so com zip+manifest (auto-updater).")
+
     if not shutil.which("gh"):
         alvo = (f"https://github.com/{repo}/releases/new"
                 if repo else "https://github.com/<seu-usuario>/<repo>/releases/new")
         print("\n[3/3] gh CLI nao encontrado — suba os arquivos na mao.")
         print(f"\n  1. Abra: {alvo}")
         print(f"  2. Tag  : v{versao}")
-        print(f"  3. Anexe OS DOIS arquivos:")
-        print(f"       {caminho_zip}")
-        print(f"       {caminho_manifesto}")
+        print(f"  3. Anexe os arquivos:")
+        print(f"       {caminho_zip}          (obrigatorio — auto-updater)")
+        print(f"       {caminho_manifesto}    (obrigatorio — auto-updater)")
+        if tem_instalador:
+            print(f"       {instalador}  (o que as pessoas baixam pra instalar)")
         print("\nSem o manifest.json o app RECUSA a atualizacao: e dele que sai")
         print("o SHA-256 usado para conferir o pacote.")
         print("\nPara automatizar da proxima vez:  winget install GitHub.cli")
         return 0
 
     print(f"[3/3] Publicando em {repo or '(remote atual)'} ...")
+    arquivos = [caminho_zip, caminho_manifesto]
+    if tem_instalador:
+        arquivos.append(instalador)
     cmd = ["gh", "release", "create", f"v{versao}",
-           caminho_zip, caminho_manifesto,
+           *arquivos,
            "--title", f"bio-pdv {versao}",
            "--notes", args.notas or f"Versao {versao}"]
     if repo:
@@ -147,6 +170,8 @@ def main() -> int:
         return r.returncode
 
     print(f"\nPronto. Os caixas veem a {versao} em 'Atualizar'.")
+    if tem_instalador:
+        print(f"Instalacao do zero: baixe bio-pdv-setup.exe na pagina de Releases.")
     return 0
 
 
