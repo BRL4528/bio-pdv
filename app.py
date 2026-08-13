@@ -160,8 +160,8 @@ def main() -> int:
     ouvinte = None
     if agente and _kb is not None:
         try:
-            # dispara na thread do Qt, nunca na thread do listener
-            from PySide6.QtCore import QTimer
+            # dispara na thread do Qt, nunca na thread do listener (QTimer ja
+            # importado no topo do modulo)
             ouvinte = _kb.GlobalHotKeys(
                 {ATALHO: lambda: QTimer.singleShot(0, agente.aciona)})
             ouvinte.daemon = True
