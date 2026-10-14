@@ -25,6 +25,9 @@ from .vault import _cifra, _decifra, pasta_dados
 
 TIMEOUT = 20
 
+# mesma API que o samasc-web usa (src/services/api.ts)
+SERVIDOR_PADRAO = "https://samasc.cooasgo.com.br:3333"
+
 ARQUIVO_DISPOSITIVO = os.path.join(pasta_dados(), "dispositivo.json")
 
 

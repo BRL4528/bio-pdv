@@ -1,3 +1,3 @@
 """bio-pdv — liberacao de senha de supervisor no PDV por biometria."""
 
-__version__ = "1.3.1"
+__version__ = "1.3.2"

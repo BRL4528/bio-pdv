@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import argparse
+import signal
 import sys
 
 from PySide6.QtCore import Qt, QTimer
@@ -62,6 +63,9 @@ def main() -> int:
                     help="segundos aguardando o dedo")
     args = ap.parse_args()
 
+    # o loop do Qt nao devolve controle ao Python, entao o KeyboardInterrupt
+    # nunca dispara; SIG_DFL faz o Ctrl+C no terminal encerrar de verdade
+    signal.signal(signal.SIGINT, signal.SIG_DFL)
     app = QApplication(sys.argv)
     app.setApplicationName("bio-pdv")
     app.setQuitOnLastWindowClosed(False)

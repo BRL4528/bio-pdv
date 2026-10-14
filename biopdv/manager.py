@@ -80,8 +80,7 @@ class DialogoLoginAdmin(QDialog):
         self.access = None
         self.token = None
 
-        self.url = QLineEdit(base_url)
-        self.url.setPlaceholderText("https://api.samasc.cooasgo.com.br")
+        self.url = QLineEdit(base_url or sync.SERVIDOR_PADRAO)
         self.nickname = QLineEdit()
         self.nickname.setPlaceholderText("usuario do ERP")
         self.senha = QLineEdit()
@@ -133,7 +132,7 @@ class DialogoConfigurarSincronizacao(QDialog):
         self.setWindowTitle("Configurar sincronizacao deste PDV")
         self.setMinimumWidth(400)
 
-        self.url = QLineEdit(base_url)
+        self.url = QLineEdit(base_url or sync.SERVIDOR_PADRAO)
         self.nickname = QLineEdit()
         self.nickname.setPlaceholderText("usuario admin do ERP")
         self.senha = QLineEdit()
@@ -242,10 +241,12 @@ class DialogoAutorizarApp(QDialog):
 
     def _passo_contagem(self):
         if self._contagem <= 0:
+            # le ANTES de restaurar: showNormal/activateWindow devolvem o foco
+            # pra esta tela, e a leitura detectaria o proprio bio-pdv
+            processo = inject.processo_em_foco()
             self.showNormal()
             self.raise_()
             self.activateWindow()
-            processo = inject.processo_em_foco()
             self.btn_detectar.setEnabled(True)
             self.btn_detectar.setText("Detectar processo em foco agora")
             if not processo:

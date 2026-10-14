@@ -11,6 +11,8 @@ UTF-16, entao independe do layout de teclado (ABNT2, US, o que for).
 from __future__ import annotations
 
 import os
+import re
+import subprocess
 import sys
 import time
 
@@ -192,8 +194,37 @@ else:
         _teclado.press(Key.enter)
         _teclado.release(Key.enter)
 
+    # Foco via xprop (X11). Em Wayland ou sem xprop devolve "" -- mesmo
+    # comportamento de antes, a lista de apps autorizados so nao casa.
+    def _xprop(*args: str) -> str:
+        try:
+            return subprocess.run(["xprop", *args], capture_output=True,
+                                  text=True, timeout=2).stdout
+        except (OSError, subprocess.SubprocessError):
+            return ""
+
+    def _janela_ativa() -> str:
+        m = re.search(r"window id # (0x[0-9a-fA-F]+)",
+                      _xprop("-root", "_NET_ACTIVE_WINDOW"))
+        return m.group(1) if m and int(m.group(1), 16) else ""
+
     def janela_em_foco() -> str:
-        return ""
+        wid = _janela_ativa()
+        if not wid:
+            return ""
+        m = re.search(r'= "(.*)"', _xprop("-id", wid, "_NET_WM_NAME"))
+        return m.group(1) if m else ""
 
     def processo_em_foco() -> str:
-        return ""
+        """Basename de /proc/<pid>/exe da janela ativa. Programa em Python
+        aparece como o interpretador (python3.x), nao como o script."""
+        wid = _janela_ativa()
+        if not wid:
+            return ""
+        m = re.search(r"= (\d+)", _xprop("-id", wid, "_NET_WM_PID"))
+        if not m:
+            return ""
+        try:
+            return os.path.basename(os.readlink(f"/proc/{m.group(1)}/exe"))
+        except OSError:
+            return ""
