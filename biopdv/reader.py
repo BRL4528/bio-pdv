@@ -16,8 +16,14 @@ from dataclasses import dataclass
 import serial
 from serial.tools import list_ports
 
-VENDOR_ID = 0x079B
-KNOWN_PRODUCTS = {0x0024: "MSO 300", 0x0047: "CBM OEM"}
+# (VID, PID) -> modelo. 079B = Sagem/Morpho antigo; 225D = Idemia (CBM-E3,
+# o modulo do relogio Kronos InTouch 9000). Os dois falam o mesmo ILV.
+LEITORES = {
+    (0x079B, 0x0024): "MSO 300",
+    (0x079B, 0x0047): "CBM OEM",
+    (0x225D, 0x0008): "CBM-E3",
+}
+VENDORS = {vid for vid, _ in LEITORES}
 BAUDRATE = 38400
 
 SYNC = b"SYNC"
@@ -103,7 +109,7 @@ def _frame(payload: bytes) -> bytes:
 
 def detecta_portas() -> list[str]:
     """Portas cujo VID e da Morpho, mais candidatas genericas."""
-    achadas = [p.device for p in list_ports.comports() if p.vid == VENDOR_ID]
+    achadas = [p.device for p in list_ports.comports() if p.vid in VENDORS]
     if achadas:
         return achadas
     # o driver usbserial generico do Linux nao propaga VID/PID

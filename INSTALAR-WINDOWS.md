@@ -57,7 +57,7 @@ Duplo clique em `bio-pdv-setup.exe`. Ele pergunta o tipo de instalação:
 
 | Tipo | Onde usar | O que instala |
 |---|---|---|
-| **PC do caixa** | máquina do PDV | agente: bolha flutuante + atalho `Ctrl+Alt+B` |
+| **PC do caixa** | máquina do PDV | agente: bolha flutuante + atalho `Ctrl+Alt+B`. A gestão (cadastro de digital) abre pelo ícone da bandeja — é aqui que o leitor está plugado |
 | **PC do administrador** | seu note | só a tela de gestão de supervisores |
 | **Completo** | máquina de teste | um atalho único ("bio-pdv (completo)") com bandeja + bolha + gestão no mesmo processo |
 
@@ -105,7 +105,7 @@ Tem que aparecer uma **porta COM** (em "Portas (COM e LPT)").
 Esse é o único risco que não dá para descartar antes de testar: o descritor USB
 desse módulo é fora de norma e o Linux precisou de contorno. Se o Windows também
 recusar, aparece como dispositivo desconhecido — me avise que existe saída
-(instalar um `.inf` genérico apontando o `usbser.sys` para `VID_079B&PID_0047`).
+(instalar um `.inf` genérico apontando o `usbser.sys` para `VID_225D&PID_0008` no CBM-E3, ou `VID_079B&PID_0047` no módulo antigo).
 
 **2. Cadastre os supervisores** pela tela de gestão, e configure **no PDV** a mesma
 senha que o programa sorteou para cada login.

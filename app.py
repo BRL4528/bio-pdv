@@ -79,8 +79,9 @@ def main() -> int:
             "porta COM para o leitor.\n\n"
             "Linux: rode\n"
             "  sudo modprobe usbserial\n"
-            "  echo \"079b 0047\" | sudo tee "
+            "  echo \"225d 0008\" | sudo tee "
             "/sys/bus/usb-serial/drivers/generic/new_id\n"
+            "  (modulo antigo: \"079b 0047\")\n"
             "  sudo chmod 666 /dev/ttyUSB0")
         return 1
 
@@ -111,13 +112,15 @@ def main() -> int:
     timer_sync.start(INTERVALO_SYNC_MS)
     _sincroniza_em_segundo_plano()
 
-    janela = None
-    if not args.agente:
-        janela = JanelaGestao(porta, vault)
+    # Criada sob demanda e disponivel em TODOS os modos: no PC do caixa
+    # (--agente) e onde o leitor esta plugado, entao e la que se cadastra a
+    # digital. Mexer em supervisor ja exige login admin do ERP.
+    _janela_ref = [None]
 
     def abre_gestao():
-        if janela is None:
-            return
+        if _janela_ref[0] is None:
+            _janela_ref[0] = JanelaGestao(porta, vault)
+        janela = _janela_ref[0]
         janela.atualiza()
         janela.showNormal()
         janela.raise_()
@@ -139,15 +142,14 @@ def main() -> int:
         menu.addAction(a_liberar)
         menu.addSeparator()
 
-    if janela:
-        a_gestao = QAction("Gerenciar supervisores", menu)
-        a_gestao.triggered.connect(abre_gestao)
-        menu.addAction(a_gestao)
-        # clique simples ou duplo na bandeja abre a gestao -- sem isso o usuario
-        # nao acha a interface (no Windows o icone fica no estouro da bandeja)
-        tray.activated.connect(
-            lambda motivo: abre_gestao() if motivo in (
-                QSystemTrayIcon.Trigger, QSystemTrayIcon.DoubleClick) else None)
+    a_gestao = QAction("Gerenciar supervisores", menu)
+    a_gestao.triggered.connect(abre_gestao)
+    menu.addAction(a_gestao)
+    # clique simples ou duplo na bandeja abre a gestao -- sem isso o usuario
+    # nao acha a interface (no Windows o icone fica no estouro da bandeja)
+    tray.activated.connect(
+        lambda motivo: abre_gestao() if motivo in (
+            QSystemTrayIcon.Trigger, QSystemTrayIcon.DoubleClick) else None)
 
     if agente:
         a_bolha = QAction("Mostrar/ocultar botao flutuante", menu)
@@ -177,11 +179,11 @@ def main() -> int:
 
     # Abre a gestao quando faz sentido: modo --gestao, ou primeira execucao
     # (cofre vazio). Senao o app "some" na bandeja e o usuario nao acha nada.
-    if janela and (args.gestao or not vault.listar()):
+    if args.gestao or not vault.listar():
         abre_gestao()
         if not args.gestao and not vault.listar():
             QMessageBox.information(
-                janela, "Primeira execucao",
+                _janela_ref[0], "Primeira execucao",
                 "Nenhum supervisor cadastrado ainda.\n\n"
                 "Cadastre o primeiro nesta tela. Depois o programa fica no "
                 "icone da bandeja (perto do relogio) — clique nele para "
