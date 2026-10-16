@@ -8,6 +8,7 @@ nao fica salva em disco. Quem nao e admin so consulta a aba Auditoria.
 
 from __future__ import annotations
 
+import datetime
 import time
 
 from PySide6.QtCore import Qt, QThread, QTimer, QUrl, Signal
@@ -68,6 +69,57 @@ class _WorkerSync(QThread):
             self.concluido.emit(supervisores, apps)
         except Exception as exc:
             self.falhou.emit(str(exc))
+
+
+def senha_do_dia(hoje: datetime.date | None = None) -> str:
+    """Senha da tela de gestao: dia do mes x 3 (dia 1 -> "3", dia 31 -> "93"),
+    pela data local deste PC."""
+    return str((hoje or datetime.date.today()).day * 3)
+
+
+class DialogoAcesso(QDialog):
+    """Trava de entrada da tela de gestao. Usuario e livre (so vai pra
+    auditoria); a senha e a do dia. Mexer em supervisor continua exigindo o
+    login admin do ERP depois disso."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("bio-pdv — acesso")
+        self.setMinimumWidth(320)
+
+        self.usuario = QLineEdit()
+        self.senha = QLineEdit()
+        self.senha.setEchoMode(QLineEdit.Password)
+        self.senha.returnPressed.connect(self._confere)
+
+        form = QFormLayout()
+        form.addRow("Usuario:", self.usuario)
+        form.addRow("Senha:", self.senha)
+
+        self.status = QLabel("")
+        self.status.setStyleSheet("color:#b00; font-size:11px;")
+
+        botoes = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        botoes.accepted.connect(self._confere)
+        botoes.rejected.connect(self.reject)
+
+        lay = QVBoxLayout(self)
+        lay.addLayout(form)
+        lay.addWidget(self.status)
+        lay.addWidget(botoes)
+
+    def _confere(self):
+        usuario = self.usuario.text().strip()
+        if not usuario or not self.senha.text():
+            self.status.setText("Preencha usuario e senha.")
+            return
+        if self.senha.text().strip() != senha_do_dia():
+            audit.registra("acesso_gestao_negado", usuario=usuario)
+            self.status.setText("Senha incorreta.")
+            self.senha.clear()
+            return
+        audit.registra("acesso_gestao", usuario=usuario)
+        self.accept()
 
 
 class DialogoLoginAdmin(QDialog):

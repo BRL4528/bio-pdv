@@ -16,11 +16,11 @@ import sys
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QAction, QColor, QIcon, QPainter, QPixmap
-from PySide6.QtWidgets import QApplication, QMenu, QMessageBox, QSystemTrayIcon
+from PySide6.QtWidgets import QApplication, QDialog, QMenu, QMessageBox, QSystemTrayIcon
 
 from biopdv import audit, reader as rd
 from biopdv.agent import AgentePDV
-from biopdv.manager import JanelaGestao, _WorkerSync
+from biopdv.manager import DialogoAcesso, JanelaGestao, _WorkerSync
 from biopdv.vault import Vault
 
 INTERVALO_SYNC_MS = 120_000  # 2 minutos
@@ -121,6 +121,9 @@ def main() -> int:
         if _janela_ref[0] is None:
             _janela_ref[0] = JanelaGestao(porta, vault)
         janela = _janela_ref[0]
+        # ja aberta: so traz pra frente; fechada: pede a senha do dia de novo
+        if not janela.isVisible() and DialogoAcesso().exec() != QDialog.Accepted:
+            return
         janela.atualiza()
         janela.showNormal()
         janela.raise_()
@@ -181,7 +184,7 @@ def main() -> int:
     # (cofre vazio). Senao o app "some" na bandeja e o usuario nao acha nada.
     if args.gestao or not vault.listar():
         abre_gestao()
-        if not args.gestao and not vault.listar():
+        if not args.gestao and not vault.listar() and _janela_ref[0].isVisible():
             QMessageBox.information(
                 _janela_ref[0], "Primeira execucao",
                 "Nenhum supervisor cadastrado ainda.\n\n"

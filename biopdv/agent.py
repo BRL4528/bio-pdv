@@ -7,9 +7,15 @@ o campo de senha do PDV perde o cursor e a digitacao vai pro vazio.
   Qt.Tool                      -> nao aparece na barra de tarefas / Alt+Tab
   Qt.WindowStaysOnTopHint      -> fica sobre o PDV em tela cheia
   Qt.FramelessWindowHint       -> sem barra de titulo
+
+StaysOnTop sozinho nao segura: se o PDV tambem e topmost, quem foi ativado por
+ultimo fica na frente, e cada clique no PDV joga a bolha pra tras. Por isso a
+bolha reafirma HWND_TOPMOST periodicamente (SWP_NOACTIVATE: nao rouba foco).
 """
 
 from __future__ import annotations
+
+import sys
 
 from PySide6.QtCore import QPoint, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QPainter, QPen
@@ -20,6 +26,27 @@ from .vault import Vault
 from .worker import LeitorWorker
 
 OCIOSO, LENDO, OK, ERRO = "ocioso", "lendo", "ok", "erro"
+
+INTERVALO_TOPO_MS = 250
+
+if sys.platform.startswith("win"):
+    import ctypes
+    from ctypes import wintypes
+
+    _user32 = ctypes.WinDLL("user32", use_last_error=True)
+    _user32.SetWindowPos.argtypes = [
+        wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int,
+        ctypes.c_int, ctypes.c_int, wintypes.UINT]
+    _user32.SetWindowPos.restype = wintypes.BOOL
+    _HWND_TOPMOST = wintypes.HWND(-1)
+    _SWP_NOSIZE, _SWP_NOMOVE, _SWP_NOACTIVATE = 0x0001, 0x0002, 0x0010
+
+    def _poe_no_topo(widget: QWidget):
+        _user32.SetWindowPos(int(widget.winId()), _HWND_TOPMOST, 0, 0, 0, 0,
+                             _SWP_NOSIZE | _SWP_NOMOVE | _SWP_NOACTIVATE)
+else:
+    def _poe_no_topo(widget: QWidget):
+        widget.raise_()
 
 CORES = {
     OCIOSO: ("#2d6cdf", "Digital"),
@@ -56,6 +83,14 @@ class BotaoFlutuante(QWidget):
         lay.setContentsMargins(0, 0, 0, 0)
         lay.addWidget(self.rotulo)
         self.define_estado(OCIOSO)
+
+        self._timer_topo = QTimer(self)
+        self._timer_topo.timeout.connect(self._reafirma_topo)
+        self._timer_topo.start(INTERVALO_TOPO_MS)
+
+    def _reafirma_topo(self):
+        if self.isVisible():
+            _poe_no_topo(self)
 
     def define_estado(self, estado: str, texto: str | None = None):
         self.estado = estado
